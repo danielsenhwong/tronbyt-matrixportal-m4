@@ -1,0 +1,20 @@
+services:
+#  tronbyt-server:
+#    image: ghcr.io/tronbyt/server:latest
+#    ports:
+#      - "8002:8000"
+#    restart: unless-stopped
+
+  tronbyt-webp-png:
+    build: ./app
+    ports:
+      - "8001:8001"
+    #environment:
+      # Add any necessary env vars here
+#    depends_on:
+#      - tronbyt-server
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+volumes:
+  data:
