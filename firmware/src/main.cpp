@@ -49,6 +49,8 @@ ImageType detectImageType(const uint8_t *buf, int len) {
   return IMAGE_UNKNOWN;
 }
 
+ImageType lastImageType = IMAGE_UNKNOWN;
+
 // Draw callback for PNGdec
 int PNGDraw(PNGDRAW *pDraw) {
   uint8_t *p = pDraw->pPixels;
@@ -62,57 +64,121 @@ int PNGDraw(PNGDRAW *pDraw) {
   return 1;
 }
 
-// Draw callback for AnimatedGIF
-void GIFDraw(GIFDRAW *pDraw) {
-  uint16_t bgColor = matrix.color565(0, 0, 0); // background (black)
-  int x0 = pDraw->iX;
-  int w = pDraw->iWidth;
-  
-  if (pDraw->ucPaletteType == 1) { // Palette-based
-    for (int i = 0; i < pDraw->iCanvasWidth; i++) {
-      uint16_t color = bgColor;
-      if (i >= pDraw->iX && i < pDraw->iX + pDraw->iWidth) {
-        int idx = pDraw->pPixels[i - pDraw->iX]; // Correct index into palette
-        uint8_t r = pDraw->pPalette[idx * 3 + 0];
-        uint8_t g = pDraw->pPalette[idx * 3 + 1];
-        uint8_t b = pDraw->pPalette[idx * 3 + 2];
-        color = matrix.color565(r, g, b);
-      }
-      matrix.drawPixel(i, pDraw->y, color);
-    }
-  } else { // RGB
-    uint8_t *p = pDraw->pPixels;
-    for (int i = 0; i < pDraw->iCanvasWidth; i++) {
-      uint16_t color = bgColor;
-      if (i >= x0 && i < x0 + w) {
-        // Only fill pixels within dirty rectangle
-        uint8_t r = *p++;
-        uint8_t g = *p++;
-        uint8_t b = *p++;
-        color = matrix.color565(r, g, b);
-      }
-      matrix.drawPixel(i, pDraw->y, color);
+// Efficient horizontal span copy, adapted from Adafruit's example
+void span(uint16_t *src, int16_t x, int16_t y, int16_t width) {
+  if (x >= matrix.width()) return;
+  int16_t x2 = x + width - 1;
+  if (x2 < 0) return;
+  if (x < 0) {
+    width += x;
+    src -= x;
+    x = 0;
+  }
+  if (x2 >= matrix.width()) {
+    width -= (x2 - matrix.width() + 1);
+  }
+  if(matrix.getRotation() == 0) {
+    memcpy(matrix.getBuffer() + y * matrix.width() + x, src, width * 2);
+  } else {
+    while(x <= x2) {
+      matrix.drawPixel(x++, y, *src++);
     }
   }
+}
 
-  Serial.print("Expected pixel data bytes: "); Serial.println(w * 3);
+// Adafruit-style AnimatedGIF draw callback
+uint8_t clampToByte(int value) {
+  return (value < 0) ? 0 : (value > 255 ? 255 : value);
+}
 
-  Serial.print("GIF line y: "); Serial.print(pDraw->y);
-  Serial.print(" iX="); Serial.print(pDraw->iX);
-  Serial.print(" width: "); Serial.print(pDraw->iWidth);
-  Serial.print(" paletteType="); Serial.print(pDraw->ucPaletteType);
-  Serial.print(" iCanvasWidth="); Serial.println(pDraw->iCanvasWidth);
+void GIFDraw(GIFDRAW *pDraw) {
+  int y = pDraw->y;
+  int x0 = pDraw->iX;
+  int w = pDraw->iWidth;
+  uint16_t usTemp[MATRIX_WIDTH];
+  uint16_t *usPalette = pDraw->pPalette;
+  uint8_t *s = pDraw->pPixels;
 
-  uint8_t *start = pDraw->pPixels;
-  uint8_t *end = pDraw->pPixels + w * 3;
-  Serial.print("First pixel: ");
-  Serial.print(start[0]); Serial.print(",");
-  Serial.print(start[1]); Serial.print(",");
-  Serial.print(start[2]); Serial.println();
-  Serial.print("Last pixel: ");
-  Serial.print(end[-3]); Serial.print(",");
-  Serial.print(end[-2]); Serial.print(",");
-  Serial.print(end[-1]); Serial.println();
+  // Palette-based GIFs (most common for web GIFs!)
+  if (pDraw->ucPaletteType == 0) {
+    if (pDraw->ucHasTransparency) {
+      uint8_t *pEnd, c, ucTransparent = pDraw->ucTransparent;
+      int x = 0, iCount = 0;
+      pEnd = s + w;
+      while (x < w) {
+        c = ucTransparent - 1;
+        uint16_t *d = usTemp;
+        while (c != ucTransparent && s < pEnd) {
+          c = *s++;
+          if (c == ucTransparent) {
+            s--;
+          } else {
+            // *d++ = usPalette[c];
+            // incorporate brightness adjustment
+            // uint8_t idx = c;
+            uint8_t r = uint8_t(pDraw->pPalette[c * 3 + 0] * brightness);
+            uint8_t g = uint8_t(pDraw->pPalette[c * 3 + 1] * brightness);
+            uint8_t b = uint8_t(pDraw->pPalette[c * 3 + 2] * brightness);
+            *d++ = matrix.color565(r, g, b);
+            iCount++;
+          }
+        }
+        if (iCount) {
+          span(usTemp, x0 + x, y, iCount);
+          x += iCount;
+          iCount = 0;
+        }
+        c = ucTransparent;
+        while (c == ucTransparent && s < pEnd) {
+          c = *s++;
+          if (c == ucTransparent) iCount++;
+          else s--;
+        }
+        if (iCount) {
+          x += iCount;
+          iCount = 0;
+        }
+      }
+    } else {
+      s = pDraw->pPixels;
+      for (int x = 0; x < w; x++) {
+        // usTemp[x] = usPalette[*s++];
+        // incorporate brightness adjustment
+        uint8_t idx = *s++;
+        uint16_t color = pDraw->pPalette[idx]; // palette entry in RGB565
+
+        // Extract R, G, B from RGB565
+        uint8_t r = ((color >> 11) & 0x1F) << 3; // 5 bits, scaled to 8
+        uint8_t g = ((color >> 5) & 0x3F) << 2;  // 6 bits, scaled to 8
+        uint8_t b = (color & 0x1F) << 3;         // 5 bits, scaled to 8
+
+        // Apply brightness and clamp
+        r = clampToByte(int(r * brightness));
+        g = clampToByte(int(g * brightness));
+        b = clampToByte(int(b * brightness));
+
+        // Convert back to RGB565 for display
+        usTemp[x] = matrix.color565(r, g, b);
+
+        // uint8_t r = uint8_t(pDraw->pPalette[idx * 3 + 0] * brightness);
+        // uint8_t g = uint8_t(pDraw->pPalette[idx * 3 + 1] * brightness);
+        // uint8_t b = uint8_t(pDraw->pPalette[idx * 3 + 2] * brightness);
+        // usTemp[x] = matrix.color565(r, g, b);
+      }
+      span(usTemp, x0, y, w);
+    }
+  }
+  // Truecolor GIFs (paletteType==0): RGB bytes
+  else {
+    s = pDraw->pPixels;
+    for (int x = 0; x < w; x++) {
+      uint8_t r = *s++;
+      uint8_t g = *s++;
+      uint8_t b = *s++;
+      usTemp[x] = matrix.color565(r, g, b);
+    }
+    span(usTemp, x0, y, w);
+  }
 }
 
 void setup() {
@@ -178,7 +244,7 @@ void fetchAndDrawImage() {
     }
     int pos = 0;
     unsigned long lastRead = millis();
-    const unsigned long timeout = 10000; // 10 seconds
+    const unsigned long timeout = 5000; // 5 seconds
     while (pos < contentLength) {
       if (millis() - lastRead > timeout) {
         Serial.println("Timeout during download!");
@@ -214,6 +280,7 @@ void fetchAndDrawImage() {
     imageLoaded = true;
 
     ImageType imgType = detectImageType(lastImageBuffer, lastImageLength);
+    lastImageType = imgType;
 
     matrix.fillScreen(matrix.color565(0,0,0));
     matrix.show();
@@ -282,12 +349,27 @@ void loop() {
   if (redraw && imageLoaded) {
     matrix.fillScreen(matrix.color565(0,0,0));
     matrix.show();
-    int rc = png.openRAM(lastImageBuffer, lastImageLength, PNGDraw);
-    if (rc == PNG_SUCCESS) {
-      png.decode(NULL, 0);
-      matrix.show();
-    } else {
-      Serial.print("PNGdec error on redraw: "); Serial.println(rc);
+    if (lastImageType == IMAGE_PNG) {
+      int rc = png.openRAM(lastImageBuffer, lastImageLength, PNGDraw);
+      if (rc == PNG_SUCCESS) {
+        png.decode(NULL, 0);
+        matrix.show();
+      } else {
+        Serial.print("PNGdec error on redraw: "); Serial.println(rc);
+      }
+    } else if (lastImageType == IMAGE_GIF) {
+      int rc = gif.open((uint8_t *)lastImageBuffer, lastImageLength, GIFDraw);
+      if (rc == 1) {
+        int delay_ms;
+        do {
+          matrix.show();
+          delay_ms = gif.playFrame(true, NULL);
+          if (delay_ms > 0)
+            delay(delay_ms);
+        } while (delay_ms > 0);
+      } else {
+        Serial.print("GIF error on redraw: "); Serial.println(rc);
+      }
     }
   }
 

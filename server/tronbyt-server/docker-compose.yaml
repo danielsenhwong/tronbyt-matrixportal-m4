@@ -1,11 +1,9 @@
 services:
-#  tronbyt-server:
-#    image: ghcr.io/tronbyt/server:latest
-#    ports:
-#      - "8002:8000"
-#    restart: unless-stopped
-  web:
+  tronbyt-server:
     image: ghcr.io/tronbyt/server:latest
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     restart: unless-stopped
     ports:
       - "${SERVER_PORT}:8000" # Map server port on the host to port 8000 in the container
