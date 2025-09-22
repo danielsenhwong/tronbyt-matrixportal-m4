@@ -72,3 +72,11 @@ The MatrixPortal M4 is much less powerful than more recent ESP32-based boards li
 ## to do
 - automatically dim or turn off at night
 - can we build a pollen forecast app using a free or public API? `https://developers.google.com/maps/documentation/pollen/overview`
+
+## references
+- https://learn.adafruit.com/adafruit-matrixportal-m4/pinouts
+- https://github.com/tronbyt
+- https://learn.adafruit.com/adafruit-protomatter-rgb-matrix-library/arduino-library
+- https://learn.adafruit.com/animated-gif-player-for-matrix-portal/overview
+- https://emackinnon.io/projects/tidbyt-diy
+- https://github.com/emackinnon1/adafruit-matrixportal-s3-hdk
