@@ -183,7 +183,7 @@ void GIFDraw(GIFDRAW *pDraw) {
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial);
+  // while (!Serial);
 
   // Panel init
   ProtomatterStatus status = matrix.begin();

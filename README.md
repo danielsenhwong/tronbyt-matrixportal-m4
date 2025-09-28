@@ -4,8 +4,8 @@ attempting to make a tronbyt with hardware that is a bit too old
 ## structure
 1. ***firmware:*** PlatformIO-based environment to generate firmware for MatrixPortal M4
 2. ***server:*** Server-side applications to support tronbyt
-    a. *tronbyt-server* Docker Compose instance of pixlet
-    b. *tronbyt-webp-png* Flask app for the server-side conversion of webp files into either pngs for animated gifs, original intent was just pngs
+    1. *tronbyt-server* Docker Compose instance of pixlet
+    2. *tronbyt-webp-png* Flask app for the server-side conversion of webp files into either pngs for animated gifs, original intent was just pngs
 
 ## background
 The MatrixPortal M4 is much less powerful than more recent ESP32-based boards like the MatrixPortal S3, so the Tidbyt/Tronbyt code does not work for it directly. Examples include rendering webp files, but also flashing the firmware is not as straightforward.
