@@ -33,6 +33,8 @@ Adafruit_Protomatter matrix(
 WiFiClient wifi;
 PNG png; // PNGdec object
 AnimatedGIF gif;
+unsigned long nextGifFrameTime = 0;
+bool playingGif = false;
 
 // Buffer for image data
 uint8_t *lastImageBuffer = nullptr;
@@ -297,16 +299,12 @@ void fetchAndDrawImage() {
     } else if (imgType == IMAGE_GIF) {
       int rc = gif.open((uint8_t *)lastImageBuffer, lastImageLength, GIFDraw);
       if (rc == 1) {
-        Serial.println("GIF loaded, drawing...");
-        int delay_ms;
-        do {
-          matrix.show();
-          delay_ms = gif.playFrame(true, NULL); // returns delay for this frame
-          if (delay_ms > 0)
-            delay(delay_ms);
-        } while (delay_ms > 0);
+        Serial.println("GIF loaded, starting loop...");
+        playingGif = true;
+        nextGifFrameTime = millis(); // start immediately
       } else {
         Serial.print("GIF error: "); Serial.println(rc);
+        playingGif = false;
       }
       imageLoaded = true;
     } else {
@@ -330,6 +328,22 @@ void loop() {
   bool upNow = digitalRead(UP_BUTTON_PIN);
   bool downNow = digitalRead(DOWN_BUTTON_PIN);
   bool redraw = false;
+
+  if (playingGif && lastImageType == IMAGE_GIF) {
+    if (millis() >= nextGifFrameTime) {
+      int delay_ms = gif.playFrame(true, NULL);
+      matrix.show();
+      if (delay_ms > 0) {
+        nextGifFrameTime = millis() + delay_ms;
+      } else {
+        // End of GIF; restart from first frame to loop
+        gif.reset(); // or gif.seekFrame(0); depending on the library version
+        int firstDelay = gif.playFrame(true, NULL);
+        matrix.show();
+        nextGifFrameTime = millis() + (firstDelay > 0 ? firstDelay : 20);
+      }
+    }
+  }
 
   if (upPrev == HIGH && upNow == LOW) {
     brightness += BRIGHTNESS_STEP;
